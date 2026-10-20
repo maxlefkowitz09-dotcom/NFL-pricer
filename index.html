@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NFL Game-Winner Pricer</title>
+<style>
+:root{--bg:#f7f6f2;--card:#fff;--tx:#1d1d1b;--mu:#6b6a64;--ac:#1f6feb;--bd:#e2e0d8;--up:#15803d;--dn:#b91c1c}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--tx:#ecebe5;--mu:#9a988f;--ac:#6ea8fe;--bd:#33322e;--up:#4ade80;--dn:#f87171}}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:720px;margin:0 auto;padding:20px 16px 50px}
+h1{font-size:24px;margin:0 0 2px}h3{margin:22px 0 8px;font-size:15px;color:var(--mu);text-transform:uppercase;letter-spacing:.05em}
+.s,.n,.lab{color:var(--mu)}.s{margin:0 0 14px;font-size:14px}.n{font-size:13px}.lab{font-size:14px}
+.bar,.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+input{width:64px;padding:6px 8px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+.tabs{display:flex;gap:8px;margin:14px 0 4px}.tabs button{flex:1;padding:9px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--tx);font:inherit;cursor:pointer}
+.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.m{color:var(--mu);font-size:14px;margin-bottom:6px}.row{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.big{font-size:26px;font-weight:600}.ac{color:var(--ac)}.r{text-align:right}
+.score{font-size:18px;font-weight:600;margin-bottom:4px}.live{color:var(--dn)}
+.res{margin-top:10px;font-size:14px;font-weight:600}.up{color:var(--up)}.dn{color:var(--dn)}
+.led{font-size:20px;font-weight:600}
+</style></head><body><main>
+<h1>NFL Game-Winner Pricer</h1>
+<p class="s" id="upd">Loading…</p>
+
+<div class="bar">Option pays $<input id="m" type="number"> for every point the favorite wins by over <input id="k" type="number" step="0.5"> points</div>
+<div class="card" id="ledger"></div>
+<div class="tabs"><button id="t_up" class="on">Upcoming &amp; live</button><button id="t_fin">Finished</button></div>
+<div id="list"></div>
+<p class="n">Odds come from Polymarket (or ESPN’s odds, labeled, when Polymarket has no market for a game) and refresh about every 10 minutes. Odds are saved until kickoff, then locked, and a finished game is settled against its locked pregame price. A hypothetical tracker, not betting advice.</p>
+
+<script>
+const $=id=>document.getElementById(id),SIG=13.5;
+const erf=x=>{const s=Math.sign(x);x=Math.abs(x);const t=1/(1+0.3275911*x);return s*(1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x))};
+const N=x=>0.5*(1+erf(x/Math.SQRT2)),phi=x=>Math.exp(-x*x/2)/Math.sqrt(2*Math.PI);
+const inv=p=>{const q=Math.min(p,1-p),t=Math.sqrt(-2*Math.log(q));const x=t-(2.515517+0.802853*t+0.010328*t*t)/(1+1.432788*t+0.189269*t*t+0.001308*t*t*t);return p<.5?-x:x};
+const f=(x,d=2)=>isFinite(x)?x.toFixed(d):'–';
+const usd=x=>(x<0?'−':'+')+'$'+f(Math.abs(x));
+let DB=[],META={},TAB='up',S={K:7,M:10};
+try{Object.assign(S,JSON.parse(localStorage.getItem('s')||'{}'))}catch(e){}
+$('k').value=S.K;$('m').value=S.M;
+
+function opt(p){const pf=Math.min(Math.max(Math.max(p,1-p),.001),.999),mu=SIG*inv(pf),d=(mu-S.K)/SIG;return{pf,pts:(mu-S.K)*N(d)+SIG*phi(d)}}
+const when=s=>new Date(s).toLocaleString([],{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+function settle(g){
+ if(g.state!=='post'||g.p_home==null||g.home.score==null||g.away.score==null)return null;
+ const o=opt(g.p_home),favHome=g.p_home>=.5,margin=favHome?g.home.score-g.away.score:g.away.score-g.home.score;
+ const got=o.pts*S.M,owed=S.M*Math.max(margin-S.K,0);
+ return{margin,got,owed,net:got-owed,fav:favHome?g.home.mascot:g.away.mascot};
+}
+function moved(g){
+ const h=g.history||[];if(h.length<2)return'';
+ const last=h[h.length-1],cut=new Date(last[0])-20*3600e3;
+ const old=[...h].reverse().find(x=>new Date(x[0])<=cut)||h[0];
+ let d=(last[1]-old[1])*100;if(g.p_home<.5)d=-d;
+ if(Math.abs(d)<0.5)return'';
+ return`<div class="n">Favorite’s odds ${d>0?'▲':'▼'} ${f(Math.abs(d),1)} pts since ${old===h[0]&&new Date(old[0])>cut?'first seen':'yesterday'}</div>`;
+}
+function card(g){
+ const hn=g.home.mascot,an=g.away.mascot;
+ let h=`<div class="card"><div class="m">${an} at ${hn} · ${when(g.start)}${g.state==='in'?' · <b class="live">LIVE</b>':''}</div>`;
+ if(g.state!=='pre'&&g.home.score!=null)h+=`<div class="score">${g.away.abbr} ${g.away.score} · ${g.home.abbr} ${g.home.score} <span class="lab">${g.detail||''}</span></div>`;
+ if(g.p_home==null)return h+`<div class="lab">${g.state==='pre'?'Odds not posted yet':'No pregame odds were saved for this game'}</div></div>`;
+ const o=opt(g.p_home),fav=g.p_home>=.5?hn:an;
+ h+=`<div class="row"><div><div class="lab">${fav} chance to win</div><div class="big">${f(o.pf*100,1)}%</div></div><div class="r"><div class="lab">Option price</div><div class="big ac">$${f(o.pts*S.M)}</div></div></div>`;
+ const s=settle(g);
+ if(s)h+=`<div class="res ${s.net>=0?'up':'dn'}">${s.fav} ${s.margin>=0?'won':'lost'} by ${Math.abs(s.margin)} · collected $${f(s.got)}, owed $${f(s.owed)} → ${usd(s.net)}</div>`;
+ else h+=(g.state==='pre'?moved(g):'<div class="n">Pregame odds locked at kickoff</div>')+`<div class="n">Source: ${g.source}</div>`;
+ return h+'</div>';
+}
+function render(){
+ const done=DB.map(g=>[g,settle(g)]).filter(x=>x[1]);
+ const net=done.reduce((a,x)=>a+x[1].net,0),w=done.filter(x=>x[1].net>=0).length;
+ $('ledger').innerHTML=done.length?`<div class="lab">If you had sold every option so far (${done.length} finished games, ${w} profitable)</div><div class="led ${net>=0?'up':'dn'}">${usd(net)}</div>`:`<div class="lab">Season ledger</div><div class="n">Fills in as tracked games finish.</div>`;
+ const list=DB.filter(g=>TAB==='up'?g.state!=='post':g.state==='post').sort((a,b)=>TAB==='up'?new Date(a.start)-new Date(b.start):new Date(b.start)-new Date(a.start));
+ let h='',wk=null;
+ list.forEach(g=>{if(g.week!==wk){wk=g.week;h+=`<h3>Week ${wk??''}</h3>`}h+=card(g)});
+ $('list').innerHTML=h||'<p class="n">Nothing here yet. The first update runs within about 10 minutes of setup.</p>';
+ if(META.updated){const m=Math.round((Date.now()-new Date(META.updated))/60000);$('upd').textContent=`Updated ${m<1?'just now':m+' min ago'} · refreshes automatically`}else $('upd').textContent='Waiting for the first update';
+}
+async function load(){try{const [g,m]=await Promise.all(['games','meta'].map(n=>fetch(`data/${n}.json?t=${Date.now()}`).then(r=>r.json())));DB=Object.values(g);META=m;render()}catch(e){$('upd').textContent='Couldn’t load data'}}
+['k','m'].forEach(id=>$(id).oninput=()=>{S={K:+$('k').value,M:+$('m').value};try{localStorage.setItem('s',JSON.stringify(S))}catch(e){}render()});
+$('t_up').onclick=()=>{TAB='up';$('t_up').className='on';$('t_fin').className='';render()};
+$('t_fin').onclick=()=>{TAB='fin';$('t_fin').className='on';$('t_up').className='';render()};
+load();setInterval(load,60000);setInterval(render,60000);
+</script></main></body></html>
